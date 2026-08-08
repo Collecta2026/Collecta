@@ -89,38 +89,6 @@
         </li>
         {% endif %}
       </ul>
-        </li>
-        <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">Customers</a>
-          <ul class="dropdown-menu">
-            <li><a class="dropdown-item" href="{{ url_for('customers') }}">All customers / search</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('customer_new') }}">+ New customer</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('credit_limits') }}">Credit limits</a></li>
-          </ul>
-        </li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('reminders') }}">Reminders</a></li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('calls') }}">Call Scheduler</a></li>
-        <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">Reports</a>
-          <ul class="dropdown-menu">
-            <li><a class="dropdown-item" href="{{ url_for('reports') }}">Report writer</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('collections_report') }}">Monthly collections</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('commission_report') }}">Commission by controller</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('performance_report') }}">Controller performance</a></li>
-          </ul>
-        </li>
-        <li class="nav-item"><a class="nav-link" href="{{ url_for('new_instalment') }}">+ Instalment</a></li>
-        {% if current_user.is_admin %}
-        <li class="nav-item dropdown">
-          <a class="nav-link dropdown-toggle" data-bs-toggle="dropdown" href="#">Admin</a>
-          <ul class="dropdown-menu">
-            <li><a class="dropdown-item" href="{{ url_for('users') }}">Users</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('allocations') }}">Ledger allocation</a></li>
-            <li><a class="dropdown-item" href="{{ url_for('settings') }}">Settings (FX, email, DB)</a></li>
-          </ul>
-        </li>
-        {% endif %}
-      </ul>
       <form class="d-flex me-3" method="get" action="{{ url_for('customers') }}">
         <input class="form-control form-control-sm" name="q" placeholder="Search account no. or name…">
       </form>
