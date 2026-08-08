@@ -73,7 +73,7 @@ def parse_money(s):
 
 
 def create_app():
-    app = Flask(__name__)
+    app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='/static')
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-in-production")
     # Neon connection string, e.g.
     # postgresql+psycopg://user:pass@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require
