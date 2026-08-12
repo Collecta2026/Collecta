@@ -89,7 +89,11 @@ def report_download(export, title, headers, rows, base):
 
 
 def create_app():
-    app = Flask(__name__, template_folder=".", static_folder=".", static_url_path="/static")
+    # Works whether templates/static are in their folders OR flattened next to this file.
+    _base = os.path.dirname(os.path.abspath(__file__))
+    _tpl = 'templates' if os.path.isdir(os.path.join(_base, 'templates')) else '.'
+    _stc = 'static' if os.path.isdir(os.path.join(_base, 'static')) else '.'
+    app = Flask(__name__, template_folder=_tpl, static_folder=_stc, static_url_path='/static')
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-in-production")
     # Neon connection string, e.g.
     # postgresql+psycopg://user:pass@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require

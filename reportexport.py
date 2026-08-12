@@ -1,5 +1,5 @@
 """Reusable report exporters: Excel (.xlsx) and PDF, with the organisation letterhead.
-Both take a simple (title, headers, rows) shape so any tabular report can use them."""
+PDF renders Arabic correctly (embedded Amiri font + reshaping/bidi)."""
 import io
 
 
@@ -14,6 +14,20 @@ def _logo():
         return svc.get_org_logo()   # (bytes, mime) or None
     except Exception:
         return None
+
+
+def _shape(s):
+    """Shape Arabic text (join letters, right-to-left) for correct PDF display."""
+    s = "" if s is None else str(s)
+    if any("\u0600" <= ch <= "\u06FF" or "\u0750" <= ch <= "\u077F" or
+           "\uFB50" <= ch <= "\uFDFF" or "\uFE70" <= ch <= "\uFEFF" for ch in s):
+        try:
+            import arabic_reshaper
+            from bidi.algorithm import get_display
+            return get_display(arabic_reshaper.reshape(s))
+        except Exception:
+            return s
+    return s
 
 
 def xlsx_bytes(title, headers, rows, number_cols=None):
@@ -31,7 +45,7 @@ def xlsx_bytes(title, headers, rows, number_cols=None):
         c.alignment = Alignment(horizontal="center")
     for i, row in enumerate(rows, start=r0 + 1):
         for j, v in enumerate(row, 1):
-            ws.cell(row=i, column=j, value=v)
+            ws.cell(row=i, column=j, value=v)   # Excel handles Arabic natively
     for j, h in enumerate(headers, 1):
         widest = max([len(str(h))] + [len(str(row[j - 1])) for row in rows]) if rows else len(str(h))
         ws.column_dimensions[get_column_letter(j)].width = min(42, max(10, widest + 2))
@@ -46,6 +60,13 @@ def pdf_bytes(title, headers, rows):
     from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle, Paragraph,
                                     Spacer, Image, HRFlowable)
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    import arabicfont
+    body_font = "Helvetica"
+    try:
+        body_font = arabicfont.register("Amiri")   # Arabic-capable
+    except Exception:
+        body_font = "Helvetica"
+
     NAVY = colors.HexColor("#1f3864")
     org = _org()
     wide = len(headers) > 7
@@ -53,36 +74,45 @@ def pdf_bytes(title, headers, rows):
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=pagesize, leftMargin=12 * mm, rightMargin=12 * mm,
                             topMargin=12 * mm, bottomMargin=12 * mm, title=title)
-    styles = getSampleStyleSheet()
-    org_s = ParagraphStyle("org", parent=styles["Title"], textColor=NAVY, fontSize=16, alignment=0, spaceAfter=0)
-    title_s = ParagraphStyle("ttl", parent=styles["Normal"], fontSize=11, textColor=colors.HexColor("#333333"), spaceAfter=6)
-    cell_s = ParagraphStyle("cell", parent=styles["Normal"], fontSize=7, leading=8.5)
-    head_s = ParagraphStyle("head", parent=styles["Normal"], fontSize=7.5, leading=9, textColor=colors.white, fontName="Helvetica-Bold")
+    org_s = ParagraphStyle("org", fontName="Helvetica-Bold", textColor=NAVY, fontSize=15, leading=17)
+    title_s = ParagraphStyle("ttl", fontName="Helvetica", fontSize=11, textColor=colors.HexColor("#333333"), spaceAfter=6, spaceBefore=2)
+    cell_s = ParagraphStyle("cell", fontName=body_font, fontSize=7, leading=9)
+    head_s = ParagraphStyle("head", fontName="Helvetica-Bold", fontSize=7.5, leading=9, textColor=colors.white)
     story = []
+
+    # ---- letterhead: small logo + org name on one row, title beneath ----
+    logo_flowable = None
     logo = _logo()
-    header_row = []
     if logo:
         try:
             data, mime = logo
             if "svg" not in (mime or ""):
-                img = Image(io.BytesIO(data)); 
-                ratio = img.imageHeight / float(img.imageWidth or 1)
-                img.drawWidth = 42 * mm; img.drawHeight = 42 * mm * ratio
-                header_row.append(img)
+                img = Image(io.BytesIO(data))
+                h = 15 * mm
+                w = h * (img.imageWidth / float(img.imageHeight or 1))
+                if w > 45 * mm:
+                    w = 45 * mm; h = w * (img.imageHeight / float(img.imageWidth or 1))
+                img.drawHeight = h; img.drawWidth = w
+                logo_flowable = img
         except Exception:
-            pass
-    header_row.append(Paragraph(org, org_s))
-    if header_row:
-        ht = Table([header_row], colWidths=([46 * mm, None] if len(header_row) == 2 else [None]))
-        ht.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                                ("LEFTPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 2)]))
-        story.append(ht)
+            logo_flowable = None
+    if logo_flowable is not None:
+        head = Table([[logo_flowable, Paragraph(org, org_s)]], colWidths=[48 * mm, None], rowHeights=[16 * mm])
+    else:
+        head = Table([[Paragraph(org, org_s)]])
+    head.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                              ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                              ("TOPPADDING", (0, 0), (-1, -1), 0),
+                              ("BOTTOMPADDING", (0, 0), (-1, -1), 0)]))
+    story.append(head)
     story.append(Paragraph(title, title_s))
     story.append(HRFlowable(width="100%", color=NAVY, thickness=1))
     story.append(Spacer(1, 6))
+
+    # ---- table ----
     data = [[Paragraph(str(h), head_s) for h in headers]]
     for row in rows:
-        data.append([Paragraph("" if v is None else str(v), cell_s) for v in row])
+        data.append([Paragraph(_shape(v), cell_s) for v in row])
     tbl = Table(data, repeatRows=1)
     tbl.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), NAVY),
@@ -93,7 +123,39 @@ def pdf_bytes(title, headers, rows):
         ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3),
     ]))
     story.append(tbl)
-    doc.build(story)
+
+    # ---- footer on every page: generated timestamp (left) + Page X of Y (right) ----
+    from reportlab.pdfgen import canvas as _canvas
+    from datetime import datetime as _dt
+    stamp = "Generated " + _dt.now().strftime("%Y-%m-%d %H:%M") + "  \u00b7  " + org
+
+    class _NumberedCanvas(_canvas.Canvas):
+        def __init__(self, *a, **k):
+            _canvas.Canvas.__init__(self, *a, **k)
+            self._saved = []
+
+        def showPage(self):
+            self._saved.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved)
+            for state in self._saved:
+                self.__dict__.update(state)
+                self._footer(total)
+                _canvas.Canvas.showPage(self)
+            _canvas.Canvas.save(self)
+
+        def _footer(self, total):
+            w, h = self._pagesize
+            self.setStrokeColor(colors.HexColor("#dddddd"))
+            self.line(12 * mm, 11 * mm, w - 12 * mm, 11 * mm)
+            self.setFont("Helvetica", 7)
+            self.setFillColor(colors.HexColor("#777777"))
+            self.drawString(12 * mm, 7 * mm, stamp)
+            self.drawRightString(w - 12 * mm, 7 * mm, "Page %d of %d" % (self.getPageNumber(), total))
+
+    doc.build(story, canvasmaker=_NumberedCanvas)
     return buf.getvalue()
 
 
