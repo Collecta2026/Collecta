@@ -6,8 +6,8 @@
   <div class="col-md-3"><label class="form-label small">Currency *</label>
     <select class="form-select" name="currency" id="ccy" onchange="suggest()">
       <option value="EGP">EGP</option><option value="USD">USD</option></select></div>
-  <div class="col-md-3"><label class="form-label small">Cust Ref *</label>
-    <input class="form-control" name="cust_ref" id="ref" value="{{ nxt['EGP'] }}" required></div>
+  <div class="col-md-3"><label class="form-label small">Cust Ref <span class="text-muted">(optional)</span></label>
+    <input class="form-control" name="cust_ref" id="ref" placeholder="leave blank to auto-assign (e.g. {{ nxt['EGP'] }})"></div>
   <div class="col-md-3"><label class="form-label small">Customer Account No.</label>
     <input class="form-control" name="account_no"></div>
   <div class="col-md-3"><label class="form-label small">Credit limit</label>

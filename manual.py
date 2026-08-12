@@ -94,6 +94,25 @@ MANUAL = [
                 "Save - it appears immediately in the ledger and ageing."],
          tips=["Give new customers a new reference such as EGP049 or USD015."],
          keywords=["new instalment", "add", "instalment", "due date", "reference"]),
+    dict(id="import", cat="Ledger", title="Bulk import (instalments & payments)",
+         path="Ledger > Bulk Import", route="import_home", args={},
+         summary="Bring in many instalments or receipts at once from a spreadsheet: download a "
+                 "template, paste your rows, upload, review, confirm, and get an audit report.",
+         steps=["Open Ledger > Bulk Import.",
+                "Download the Instalments (or Payments) template and open it in Excel.",
+                "Paste your rows under the headers in the same order (see the Instructions tab), "
+                "then delete the grey example rows and save.",
+                "Upload the file and review: accepted rows, rejected rows with reasons, and the "
+                "projected balance change. Nothing is saved yet.",
+                "Click Confirm to save, then download the audit report showing accepted rows, "
+                "rejected rows, and each customer's old and new balance."],
+         tips=["Leave Customer Ref blank for a new customer and Collecta assigns the next "
+               "unused code automatically; to add several instalments for the same new "
+               "customer, give them the same Customer Name (or the same ref).",
+               "Enter only activity after the opening date (29 Jul 2026) so nothing is "
+               "double-counted; for a full catch-up import instalments first, then payments."],
+         keywords=["import", "bulk", "upload", "excel", "spreadsheet", "template", "csv",
+                   "mass", "batch", "audit", "paste"]),
     dict(id="legal", cat="Ledger", title="Legal sub-ledger & doubtful-debt provision",
          path="Ledger > Legal Sub-ledger", route="legal_ledger", args={},
          summary="Uncollected accounts can be transferred to a separate legal sub-ledger for "

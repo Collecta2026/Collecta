@@ -114,6 +114,16 @@ class Setting(db.Model):
     value = db.Column(db.Text)
 
 
+class BrandAsset(db.Model):
+    """Binary branding assets (e.g. the organisation logo), stored in the database
+    so they persist across redeploys on hosts with an ephemeral filesystem."""
+    __tablename__ = "brand_assets"
+    key = db.Column(db.String(40), primary_key=True)     # e.g. "org_logo"
+    mime = db.Column(db.String(60))
+    data = db.Column(db.LargeBinary)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 def get_setting(key, default=None):
     s = db.session.get(Setting, key)
     return s.value if s and s.value not in (None, "") else default

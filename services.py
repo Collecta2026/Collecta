@@ -944,3 +944,57 @@ def legal_candidates(report_date=None, min_days=180):
             out.append(b)
     out.sort(key=lambda x: -x["overdue"])
     return out
+
+
+def next_customer_ref(currency, reserved=None):
+    """Next unused customer reference for a currency, e.g. EGP049 / USD015.
+    Uses (highest existing number + 1); `reserved` avoids clashes within a batch."""
+    import re as _re
+    from models import Customer
+    prefix = (currency or "EGP").upper()
+    reserved = {r.upper() for r in (reserved or set())}
+    taken = set(reserved)
+    nums = []
+    for c in Customer.query.all():
+        r = (c.cust_ref or "").upper()
+        if r:
+            taken.add(r)
+        m = _re.match(rf"^{_re.escape(prefix)}0*(\d+)$", r)
+        if m and (c.currency or "").upper() == prefix:
+            nums.append(int(m.group(1)))
+    n = (max(nums) + 1) if nums else 1
+    while f"{prefix}{n:03d}" in taken:
+        n += 1
+    return f"{prefix}{n:03d}"
+
+
+# ---------------- Organisation logo (white-label branding asset) ----------------
+def set_org_logo(data, mime):
+    from models import db, BrandAsset
+    a = db.session.get(BrandAsset, "org_logo")
+    if not a:
+        a = BrandAsset(key="org_logo"); db.session.add(a)
+    a.mime = mime or "image/png"; a.data = data
+    db.session.commit()
+
+
+def get_org_logo():
+    from models import db, BrandAsset
+    a = db.session.get(BrandAsset, "org_logo")
+    return (a.data, a.mime) if (a and a.data) else None
+
+
+def has_org_logo():
+    from models import db, BrandAsset
+    try:
+        a = db.session.get(BrandAsset, "org_logo")
+        return bool(a and a.data)
+    except Exception:
+        return False
+
+
+def clear_org_logo():
+    from models import db, BrandAsset
+    a = db.session.get(BrandAsset, "org_logo")
+    if a:
+        db.session.delete(a); db.session.commit()

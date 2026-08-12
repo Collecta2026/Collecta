@@ -73,7 +73,7 @@ def parse_money(s):
 
 
 def create_app():
-    app = Flask(__name__, template_folder='.', static_folder='.', static_url_path='/static')
+    app = Flask(__name__)
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-in-production")
     # Neon connection string, e.g.
     # postgresql+psycopg://user:pass@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require
@@ -127,7 +127,7 @@ def create_app():
             brand = {"product": svc.DEFAULT_PRODUCT, "org": svc.DEFAULT_ORG}
         return dict(fx_rate=fx, email_ready=_email_ready(),
                     product_name=brand["product"], org_name=brand["org"],
-                    app_version=svc.VERSION)
+                    app_version=svc.VERSION, has_org_logo=svc.has_org_logo())
 
     def _email_ready():
         try:
@@ -145,7 +145,7 @@ def create_app():
     def _first_run_guard():
         from flask import request as rq
         ep = (rq.endpoint or "")
-        if ep in ("setup", "static") or ep.startswith("static"):
+        if ep in ("setup", "static", "login", "brand_org_logo") or ep.startswith("static"):
             return
         if _needs_setup():
             return redirect(url_for("setup"))
@@ -249,12 +249,14 @@ def create_app():
     def new_instalment():
         if request.method == "POST":
             f = request.form
-            cust = Customer.query.filter_by(cust_ref=f["cust_ref"].strip()).first()
+            ref_in = f.get("cust_ref", "").strip()
+            cust = Customer.query.filter_by(cust_ref=ref_in).first() if ref_in else None
             if not cust:                       # create a new customer on the fly
                 if not f.get("customer") or not f.get("currency"):
                     flash("New customer needs a name and currency.", "danger")
                     return redirect(url_for("new_instalment"))
-                cust = Customer(cust_ref=f["cust_ref"].strip(), account_no=f.get("account_no"),
+                new_ref = ref_in or svc.next_customer_ref(f["currency"])   # blank -> auto code
+                cust = Customer(cust_ref=new_ref, account_no=f.get("account_no"),
                                 name=f["customer"].strip(), currency=f["currency"],
                                 owner_id=(int(f["owner_id"]) if f.get("owner_id") else svc.default_owner_for(f["currency"])))
                 db.session.add(cust)
@@ -442,12 +444,14 @@ def create_app():
     def customer_new():
         if request.method == "POST":
             f = request.form
-            ref = f["cust_ref"].strip()
-            if Customer.query.filter_by(cust_ref=ref).first():
-                flash("That Cust Ref already exists.", "danger")
-            elif not f.get("name") or not f.get("currency"):
+            ref = f.get("cust_ref", "").strip()
+            if not f.get("name") or not f.get("currency"):
                 flash("Name and currency are required.", "danger")
+            elif ref and Customer.query.filter_by(cust_ref=ref).first():
+                flash("That Cust Ref already exists.", "danger")
             else:
+                if not ref:                      # blank -> auto-assign next unused code
+                    ref = svc.next_customer_ref(f["currency"])
                 db.session.add(Customer(
                     cust_ref=ref, account_no=f.get("account_no"), name=f["name"].strip(),
                     currency=f["currency"], contact_person=f.get("contact_person"),
@@ -459,10 +463,7 @@ def create_app():
                 flash(f"Customer {ref} created.", "success")
                 return redirect(url_for("customers"))
         # suggest next reference per currency
-        nxt = {}
-        for ccy in ("EGP", "USD"):
-            n = Customer.query.filter_by(currency=ccy).count()
-            nxt[ccy] = f"{ccy}{n + 1:03d}"
+        nxt = {ccy: svc.next_customer_ref(ccy) for ccy in ("EGP", "USD")}
         return render_template("customer_new.html", nxt=nxt, users=User.query.order_by(User.username).all())
 
     # ---------------- User administration (admin only) ----------------
@@ -536,6 +537,19 @@ def create_app():
             elif section == "branding":
                 set_setting("product_name", request.form.get("product_name") or svc.DEFAULT_PRODUCT)
                 set_setting("org_name", request.form.get("org_name") or svc.DEFAULT_ORG)
+                if request.form.get("remove_logo"):
+                    svc.clear_org_logo()
+                logo = request.files.get("org_logo")
+                if logo and logo.filename:
+                    data = logo.read()
+                    if len(data) > 1_500_000:
+                        flash("Logo image is too large (max ~1.5 MB). Branding text saved; logo not changed.", "warning")
+                    elif not (logo.mimetype or "").startswith("image/"):
+                        flash("That file isn't an image. Branding text saved; logo not changed.", "warning")
+                    else:
+                        svc.set_org_logo(data, logo.mimetype or "image/png")
+                        flash("Branding and organisation logo updated.", "success")
+                        return redirect(url_for("settings"))
                 flash("Branding updated.", "success")
             elif section == "commission":
                 svc.set_commission_rates(request.form)
@@ -764,6 +778,111 @@ def create_app():
         existing = svc.get_targets()
         return render_template("commission_targets.html", controllers=svc.controllers_list(),
                                order=svc.COMMISSION_ORDER, existing=existing)
+
+    @app.route("/brand/org-logo")
+    def brand_org_logo():
+        logo = svc.get_org_logo()
+        if not logo:
+            abort(404)
+        data, mime = logo
+        return Response(data, mimetype=(mime or "image/png"),
+                        headers={"Cache-Control": "no-cache"})
+
+    # ---------------- Bulk import (instalments / payments) ----------------
+    @app.route("/import")
+    @login_required
+    def import_home():
+        import importer
+        return render_template("import.html", stage="home", specs=importer.SPECS)
+
+    @app.route("/import/template/<kind>")
+    @login_required
+    def import_template(kind):
+        import importer
+        if kind not in importer.SPECS:
+            flash("Unknown template.", "warning"); return redirect(url_for("import_home"))
+        data = importer.build_template(kind)
+        fname = f"Collecta_import_template_{kind}.xlsx"
+        return Response(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f"attachment; filename={fname}"})
+
+    @app.route("/import/preview", methods=["POST"])
+    @login_required
+    def import_preview():
+        import importer, json as _json
+        kind = request.form.get("kind")
+        if kind not in importer.SPECS:
+            flash("Choose what to import.", "warning"); return redirect(url_for("import_home"))
+        f = request.files.get("file")
+        if not f or not f.filename:
+            flash("Please choose a file to upload.", "warning"); return redirect(url_for("import_home"))
+        try:
+            rows = importer.read_table(f, kind)
+        except Exception as e:
+            flash(f"Could not read that file: {e}. Use the provided template (.xlsx) or a .csv.", "warning")
+            return redirect(url_for("import_home"))
+        accepted, rejected = importer.validate(kind, rows)
+        before = importer.balances_by_customer()
+        move, tot = importer.projected(kind, accepted, before)
+        return render_template("import.html", stage="preview", kind=kind, specs=importer.SPECS,
+                               accepted=accepted, rejected=rejected, move=move, totals=tot,
+                               filename=f.filename, accepted_json=_json.dumps(accepted))
+
+    @app.route("/import/commit", methods=["POST"])
+    @login_required
+    def import_commit():
+        import importer, json as _json, tempfile, os, secrets
+        kind = request.form.get("kind")
+        if kind not in importer.SPECS:
+            flash("Unknown import.", "warning"); return redirect(url_for("import_home"))
+        try:
+            accepted = _json.loads(request.form.get("accepted_json") or "[]")
+        except ValueError:
+            accepted = []
+        if not accepted:
+            flash("Nothing to import.", "warning"); return redirect(url_for("import_home"))
+        # re-validate against current data for safety (e.g. duplicate ids created meanwhile)
+        # keep only rows whose keys still validate
+        before = importer.balances_by_customer()
+        user = (current_user.full_name or current_user.username)
+        result = importer.commit(kind, accepted, user)
+        after = importer.balances_by_customer()
+        meta = dict(user=user, when=datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    filename=request.form.get("filename") or "", affected_refs=sorted(result["affected_refs"]))
+        audit = importer.build_audit(kind, meta, accepted, [], before, after)
+        token = secrets.token_hex(8)
+        path = os.path.join(tempfile.gettempdir(), f"collecta_audit_{token}.xlsx")
+        with open(path, "wb") as fh:
+            fh.write(audit)
+        # movement table for on-screen audit
+        move = []
+        tot = {}
+        for ref in meta["affected_refs"]:
+            b = before.get(ref, {}); a = after.get(ref, {})
+            ccy = a.get("currency") or b.get("currency") or ""
+            old = b.get("net", 0.0); new = a.get("net", 0.0)
+            move.append(dict(ref=ref, name=a.get("name") or b.get("name") or "", currency=ccy,
+                             old=old, change=new - old, new=new))
+            t = tot.setdefault(ccy, dict(old=0.0, change=0.0, new=0.0))
+            t["old"] += old; t["change"] += (new - old); t["new"] += new
+        return render_template("import.html", stage="audit", kind=kind, specs=importer.SPECS,
+                               result=result, move=move, totals=tot, token=token, meta=meta,
+                               n_new=len(result["new_customers"]))
+
+    @app.route("/import/audit/<token>")
+    @login_required
+    def import_audit_download(token):
+        import os, tempfile, re as _re
+        if not _re.fullmatch(r"[0-9a-f]{16}", token or ""):
+            flash("Invalid audit reference.", "warning"); return redirect(url_for("import_home"))
+        path = os.path.join(tempfile.gettempdir(), f"collecta_audit_{token}.xlsx")
+        if not os.path.exists(path):
+            flash("That audit file is no longer available — re-run the import if you need it.", "warning")
+            return redirect(url_for("import_home"))
+        with open(path, "rb") as fh:
+            data = fh.read()
+        return Response(data, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        headers={"Content-Disposition": f"attachment; filename=Collecta_import_audit.xlsx"})
 
     # ---------------- Legal sub-ledger & doubtful-debt provision ----------------
     @app.route("/legal")

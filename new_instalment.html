@@ -6,7 +6,7 @@
   <div class="col-md-3"><label class="form-label small">Instalment ID *</label>
     <input class="form-control" name="inst_id" required placeholder="e.g. EGP012-07"></div>
   <div class="col-md-3"><label class="form-label small">Cust Ref *</label>
-    <input class="form-control" name="cust_ref" list="refs" required placeholder="existing or new e.g. EGP049">
+    <input class="form-control" name="cust_ref" list="refs" placeholder="existing ref, or blank to auto-assign a new one">
     <datalist id="refs">{% for c in customers %}<option value="{{ c.cust_ref }}">{% endfor %}</datalist></div>
   <div class="col-md-3"><label class="form-label small">Customer Account No.</label>
     <input class="form-control" name="account_no"></div>
