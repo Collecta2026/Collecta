@@ -1,6 +1,12 @@
 {% extends "base.html" %}{% block title %}Monthly Collections{% endblock %}
 {% block content %}
 <h4 style="color:#1f3864;">Monthly Collections by Method</h4>
+<div class="mb-3 noprint">
+  <span class="text-muted small me-2">Download:</span>
+  <a class="btn btn-sm btn-outline-success" href="?export=csv">CSV</a>
+  <a class="btn btn-sm btn-outline-success" href="?export=xlsx">Excel</a>
+  <a class="btn btn-sm btn-outline-danger" href="?export=pdf">PDF</a>
+</div>
 {% for ccy in ['EGP','USD'] %}
 <div class="card shadow-sm mb-3"><div class="card-body table-responsive">
   <h6>{{ ccy }}</h6>

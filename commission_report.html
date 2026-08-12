@@ -24,7 +24,9 @@
       {% for cc in controllers %}<option value="{{cc}}" {{'selected' if f.get('controller')==cc}}>{{cc}}</option>{% endfor %}</select></div>
   <div class="col-md-2"><button class="btn btn-sm btn-primary" style="background:#1f3864;border:0;">Run month</button></div>
   <div class="col-md-4">
-    <a class="btn btn-sm btn-success" href="{{ url_for('commission_export', month=month, controller=f.get('controller','')) }}">⬇ Download month-end statement (CSV)</a>
+    <a class="btn btn-sm btn-success" href="{{ url_for('commission_export', month=month, controller=f.get('controller',''), format='csv') }}">⬇ CSV</a>
+    <a class="btn btn-sm btn-success" href="{{ url_for('commission_export', month=month, controller=f.get('controller',''), format='xlsx') }}">⬇ Excel</a>
+    <a class="btn btn-sm btn-danger" href="{{ url_for('commission_export', month=month, controller=f.get('controller',''), format='pdf') }}">⬇ PDF</a>
   </div>
 </form>
 {% if period and period[0] %}<p class="small text-muted noprint">Period: {{ period[0] }} to {{ period[1] }}</p>{% endif %}

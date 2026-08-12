@@ -1,6 +1,12 @@
 {% extends "base.html" %}{% block title %}Credit Limits{% endblock %}
 {% block content %}
 <h4 style="color:#1f3864;">Credit Limits</h4>
+<div class="mb-3 noprint">
+  <span class="text-muted small me-2">Download:</span>
+  <a class="btn btn-sm btn-outline-success" href="?export=csv">CSV</a>
+  <a class="btn btn-sm btn-outline-success" href="?export=xlsx">Excel</a>
+  <a class="btn btn-sm btn-outline-danger" href="?export=pdf">PDF</a>
+</div>
 <p class="text-muted small">Customers whose outstanding exceeds their limit are flagged. Set limits on each customer's page.</p>
 <div class="card shadow-sm"><div class="card-body table-responsive">
 <table class="table table-sm table-hover">

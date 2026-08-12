@@ -2,6 +2,12 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="mb-0" style="color:#1f3864;">Controller Performance (by ledger)</h4>
+<div class="mb-3 noprint">
+  <span class="text-muted small me-2">Download:</span>
+  <a class="btn btn-sm btn-outline-success" href="?from={{ f.get("from","") }}&amp;to={{ f.get("to","") }}&amp;export=csv">CSV</a>
+  <a class="btn btn-sm btn-outline-success" href="?from={{ f.get("from","") }}&amp;to={{ f.get("to","") }}&amp;export=xlsx">Excel</a>
+  <a class="btn btn-sm btn-outline-danger" href="?from={{ f.get("from","") }}&amp;to={{ f.get("to","") }}&amp;export=pdf">PDF</a>
+</div>
   <div class="noprint"><button class="btn btn-sm btn-primary" style="background:#1f3864;border:0;" onclick="window.print()">Print</button></div>
 </div>
 <form class="row g-2 align-items-end mb-3 noprint" method="get">

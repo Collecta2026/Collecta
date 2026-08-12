@@ -72,8 +72,24 @@ def parse_money(s):
         return None
 
 
+def report_download(export, title, headers, rows, base):
+    """Return a CSV / Excel / PDF download from a simple (headers, rows) table."""
+    import reportexport as rx
+    if export == "xlsx":
+        return Response(rx.xlsx_bytes(title, headers, rows), mimetype=rx.XLSX_MIME,
+                        headers={"Content-Disposition": f"attachment; filename={base}.xlsx"})
+    if export == "pdf":
+        return Response(rx.pdf_bytes(title, headers, rows), mimetype=rx.PDF_MIME,
+                        headers={"Content-Disposition": f"attachment; filename={base}.pdf"})
+    buf = io.StringIO(); w = csv.writer(buf); w.writerow(headers)
+    for r in rows:
+        w.writerow(r)
+    return Response(buf.getvalue(), mimetype="text/csv",
+                    headers={"Content-Disposition": f"attachment; filename={base}.csv"})
+
+
 def create_app():
-    app = Flask(__name__, template_folder=".", static_folder=".", static_url_path="/static")
+    app = Flask(__name__)
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "change-me-in-production")
     # Neon connection string, e.g.
     # postgresql+psycopg://user:pass@ep-xxx.eu-central-1.aws.neon.tech/neondb?sslmode=require
@@ -215,6 +231,14 @@ def create_app():
         if status:
             rows = [r for r in rows if r["status"] == status]
         rows.sort(key=lambda r: (r["currency"], -r["net"]))
+        export = request.args.get("export")
+        if export in ("csv", "xlsx", "pdf"):
+            headers = ["Instalment ID", "Cust Ref", "Account No.", "Customer", "Ccy", "Original",
+                       "Received", "Net Outstanding", "Due Date", "Days Overdue", "Bucket", "Status", "Security"]
+            data = [[r["inst_id"], r["cust_ref"], r["account_no"], r["customer"], r["currency"],
+                     r["original"], r["received"], r["net"], r["due_date"], r["days_overdue"],
+                     r["bucket"], r["status"], r["security"]] for r in rows]
+            return report_download(export, "Debtors Ledger", headers, data, "debtors_ledger")
         return render_template("ledger.html", rows=rows, ccy=ccy, status=status)
 
     # ---------------- Collections ----------------
@@ -370,6 +394,13 @@ def create_app():
         if ccy not in ("EGP", "USD"):
             abort(404)
         m = svc.aged_matrix(ccy)
+        export = request.args.get("export")
+        if export in ("csv", "xlsx", "pdf"):
+            headers = ["Cust Ref", "Customer"] + m["buckets"] + ["Total"]
+            data = [[c["cust_ref"], c["customer"]] + [c["buckets"].get(b, 0.0) for b in m["buckets"]] + [c["total"]]
+                    for c in m["customers"]]
+            data.append(["TOTAL", ""] + [m["totals"].get(b, 0.0) for b in m["buckets"]] + [m["grand"]])
+            return report_download(export, f"Aged Debtors Analysis — {ccy}", headers, data, f"aged_{ccy.lower()}")
         return render_template("aged.html", m=m, ccy=ccy)
 
     # ---------------- Report writer ----------------
@@ -404,8 +435,24 @@ def create_app():
             rows.sort(key=lambda r: (r["currency"], -r["net"]))
             for c in ("EGP", "USD"):
                 totals[c] = sum(r["net"] for r in rows if r["currency"] == c)
-            if f.get("export") == "csv":
-                return _csv_export(rows)
+            export = f.get("export")
+            if export in ("csv", "xlsx", "pdf"):
+                headers = ["Instalment ID", "Cust Ref", "Account No.", "Customer", "Ccy",
+                           "Original", "Received", "Net Outstanding", "Due Date",
+                           "Days Overdue", "Bucket", "Status", "Security", "Reference"]
+                data = [[r["inst_id"], r["cust_ref"], r["account_no"], r["customer"],
+                         r["currency"], r["original"], r["received"], r["net"],
+                         r["due_date"], r["days_overdue"], r["bucket"], r["status"],
+                         r["security"], r["reference"]] for r in rows]
+                if export == "csv":
+                    return _csv_export(rows)
+                import reportexport as rx
+                title = "Aged Debtors Report"
+                if export == "xlsx":
+                    return Response(rx.xlsx_bytes(title, headers, data), mimetype=rx.XLSX_MIME,
+                                    headers={"Content-Disposition": "attachment; filename=aged_debtors.xlsx"})
+                return Response(rx.pdf_bytes(title, headers, data), mimetype=rx.PDF_MIME,
+                                headers={"Content-Disposition": "attachment; filename=aged_debtors.pdf"})
         securities = [s[0] for s in db.session.query(Instalment.security).distinct() if s[0]]
         return render_template("reports.html", rows=rows, totals=totals, ran=ran,
                                f=f, securities=sorted(securities))
@@ -436,6 +483,14 @@ def create_app():
             rows.append(dict(cust=cust, total=b["total"], overdue=b["overdue"], limit=lim,
                              over=(lim is not None and b["total"] > lim),
                              headroom=(None if lim is None else lim - b["total"])))
+        export = request.args.get("export")
+        if export in ("csv", "xlsx", "pdf"):
+            headers = ["Cust Ref", "Customer", "Ccy", "Outstanding", "Overdue", "Credit Limit", "Headroom", "Over Limit?"]
+            data = [[r["cust"].cust_ref, r["cust"].name, r["cust"].currency, r["total"], r["overdue"],
+                     ("" if r["limit"] is None else r["limit"]),
+                     ("" if r["headroom"] is None else r["headroom"]),
+                     ("YES" if r["over"] else "")] for r in rows]
+            return report_download(export, "Credit Limits", headers, data, "credit_limits")
         return render_template("credit_limits.html", rows=rows)
 
     # ---------------- Dedicated customer setup screen ----------------
@@ -611,6 +666,15 @@ def create_app():
     @login_required
     def collections_report():
         rep = svc.collections_by_month()
+        export = request.args.get("export")
+        if export in ("csv", "xlsx", "pdf"):
+            headers = ["Month", "Currency"] + rep["methods"] + ["Total"]
+            data = []
+            for ccy in ("EGP", "USD"):
+                for month in sorted(rep["data"][ccy].keys()):
+                    d = rep["data"][ccy][month]
+                    data.append([month, ccy] + [d.get(mm, 0.0) for mm in rep["methods"]] + [d.get("_total", 0.0)])
+            return report_download(export, "Monthly Collections by Method", headers, data, "monthly_collections")
         return render_template("collections_report.html", rep=rep)
 
     # ---------------- Ledger allocation (manager) ----------------
@@ -642,6 +706,18 @@ def create_app():
     def performance_report():
         f = request.args
         perf = svc.controller_performance(parse_date(f.get("from")), parse_date(f.get("to")))
+        export = request.args.get("export")
+        if export in ("csv", "xlsx", "pdf"):
+            headers = ["Controller", "Ccy", "Customers", "Outstanding", "Overdue", "Collected", "Recovery %", "Commission"]
+            data = []
+            for who in sorted(perf):
+                for ccy in ("EGP", "USD"):
+                    p = perf[who][ccy]
+                    if p["customers"] or p["collected"] or p["commission"]:
+                        rec = "" if p.get("recovery_pct") is None else round(p["recovery_pct"], 1)
+                        data.append([who, ccy, p["customers"], p["outstanding"], p["overdue"],
+                                     p["collected"], rec, p["commission"]])
+            return report_download(export, "Controller Performance", headers, data, "controller_performance")
         return render_template("performance.html", perf=perf, f=f, printable=f.get("print") == "1")
 
     # ---------------- Credit-controller call scheduler ----------------
@@ -744,17 +820,27 @@ def create_app():
         month = f.get("month") or date.today().strftime("%Y-%m")
         df, dt = svc.month_bounds(month)
         ctrl = f.get("controller") or None
-        rows = svc.commission_statement_rows(df, dt, controller=ctrl)
+        fmt = f.get("format", "csv")
+        rows = svc.commission_statement_rows(df, dt, controller=ctrl)  # rows[0] = headers
+        headers, data = rows[0], rows[1:]
+        title = f"Commission Statement — {month}" + (f" — {ctrl}" if ctrl else "")
+        base = f"commission_{month}{('_' + ctrl) if ctrl else ''}".replace(" ", "_")
+        if fmt == "xlsx":
+            import reportexport as rx
+            return Response(rx.xlsx_bytes(title, headers, data), mimetype=rx.XLSX_MIME,
+                            headers={"Content-Disposition": f"attachment; filename={base}.xlsx"})
+        if fmt == "pdf":
+            import reportexport as rx
+            return Response(rx.pdf_bytes(title, headers, data), mimetype=rx.PDF_MIME,
+                            headers={"Content-Disposition": f"attachment; filename={base}.pdf"})
         buf = io.StringIO()
         w = csv.writer(buf)
-        w.writerow([f"Commission statement — {svc.get_brand()['org']} — {month} "
-                    f"({df} to {dt})"])
+        w.writerow([f"Commission statement — {svc.get_brand()['org']} — {month} ({df} to {dt})"])
         w.writerow([])
         for r in rows:
             w.writerow(r)
-        fname = f"commission_{month}{('_' + ctrl) if ctrl else ''}.csv".replace(" ", "_")
         return Response(buf.getvalue(), mimetype="text/csv",
-                        headers={"Content-Disposition": f"attachment; filename={fname}"})
+                        headers={"Content-Disposition": f"attachment; filename={base}.csv"})
 
     @app.route("/commission/targets", methods=["GET", "POST"])
     @login_required
@@ -889,6 +975,18 @@ def create_app():
     @login_required
     def legal_ledger():
         ll = svc.legal_ledger()
+        export = request.args.get("export")
+        if export in ("csv", "xlsx", "pdf"):
+            headers = ["Cust Ref", "Customer", "Ccy", "Stage", "Gross Outstanding", "Overdue",
+                       "Provision %", "Provision", "Net of Provision", "Legal Date"]
+            data = [[r["cust"].cust_ref, r["cust"].name, r["currency"], (r["stage"] or ""),
+                     r["total"], r["overdue"], r["pct"], r["provision"], r["net"],
+                     (r["legal_date"].isoformat() if r["legal_date"] else "")] for r in ll["rows"]]
+            for ccy in ("EGP", "USD"):
+                t = ll["totals"][ccy]
+                if t["n"]:
+                    data.append([f"TOTAL {ccy}", "", ccy, "", t["gross"], t["overdue"], "", t["provision"], t["net"], ""])
+            return report_download(export, "Legal Sub-ledger & Doubtful-debt Provision", headers, data, "legal_subledger")
         cands = svc.legal_candidates(min_days=int(request.args.get("min_days", 180)))
         return render_template("legal.html", ll=ll, cands=cands, stages=svc.LEGAL_STAGES,
                                default_pct=svc.legal_provision_default(),
