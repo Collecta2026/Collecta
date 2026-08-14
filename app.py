@@ -224,6 +224,44 @@ def create_app():
         return render_template("dashboard.html", kpis=kpis, ageing=ageing, coll=coll,
                                top=top, as_at=rd, eq=eq, legal=legal)
 
+    # ---------------- Overdue customers drill-down (from dashboard) ----------------
+    @app.route("/overdue/<ccy>")
+    @login_required
+    def overdue_customers(ccy):
+        ccy = ccy.upper()
+        if ccy not in ("EGP", "USD"):
+            abort(404)
+        rd = parse_date(request.args.get("as_at")) or date.today()
+        bals = [b for b in svc.customer_balances(rd) if b["currency"] == ccy and b["overdue"] > 0]
+        bals.sort(key=lambda x: x["overdue"], reverse=True)
+        custs = {c.id: c for c in Customer.query.all()}
+        owners = {u.id: (u.full_name or u.username) for u in User.query.all()}
+
+        def worst_bucket(bk):
+            for b in reversed(svc.OVERDUE_BUCKETS):
+                if bk.get(b, 0) > 0:
+                    return b
+            return ""
+        rows = []
+        for b in bals:
+            cust = custs.get(b["customer_id"])
+            rows.append(dict(b, phone=(cust.phone if cust else ""),
+                             contact=(cust.contact_person if cust else ""),
+                             owner=(owners.get(cust.owner_id) if cust and cust.owner_id else ""),
+                             worst=worst_bucket(b["buckets"])))
+        export = request.args.get("export")
+        if export in ("csv", "xlsx", "pdf"):
+            headers = ["Cust Ref", "Customer", "Ledger Owner", "Phone", "Total Outstanding",
+                       "Overdue", "Oldest (days)", "Worst Bucket"]
+            data = [[r["cust_ref"], r["customer"], r["owner"], r["phone"], r["total"],
+                     r["overdue"], r["oldest"], r["worst"]] for r in rows]
+            data.append(["", "TOTAL", "", "", "", sum(r["overdue"] for r in rows), "", ""])
+            return report_download(export, f"Overdue Customers — {ccy}", headers, data,
+                                   f"overdue_customers_{ccy.lower()}")
+        total_overdue = sum(r["overdue"] for r in rows)
+        return render_template("overdue_customers.html", rows=rows, ccy=ccy,
+                               total_overdue=total_overdue, as_at=rd)
+
     # ---------------- Ledger ----------------
     @app.route("/ledger")
     @login_required
